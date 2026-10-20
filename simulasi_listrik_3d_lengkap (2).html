@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulasi Listrik 3D Edukatif</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; margin: 0; overflow: hidden; background-color: #e2e8f0; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; }
+        
+        /* Custom Scrollbar for Panels */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.6);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        }
+
+        .meter-spin { transition: transform 0.1s linear; }
+
+        /* Toggle Switch Styling */
+        .toggle-checkbox:checked { right: 0; border-color: #3B82F6; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #3B82F6; }
+        .toggle-checkbox { right: 0; z-index: 1; border-color: #e5e7eb; transition: all 0.3s; }
+        .toggle-label { width: 3rem; height: 1.5rem; background-color: #e5e7eb; border-radius: 9999px; transition: all 0.3s; }
+        
+        .digital-font { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Animations */
+        @keyframes popIn {
+            0% { transform: scale(0.9); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop-in { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body class="text-gray-800 antialiased h-screen w-screen overflow-hidden flex flex-col">
+
+    <!-- Container 3D -->
+    <div id="canvas-container"></div>
+
+    <div class="absolute top-0 left-0 w-full p-4 md:p-6 pointer-events-none flex flex-col md:flex-row justify-between items-start gap-4 z-10">
+        
+        <!-- Judul & Info Waktu -->
+        <div class="flex flex-col gap-3 max-w-md w-full md:w-auto">
+            <div class="glass-panel p-4 rounded-xl pointer-events-auto">
+                <h1 class="text-xl font-bold text-gray-900 leading-tight">Simulasi Beban Listrik</h1>
+                <p class="text-xs text-gray-600 mt-1">1 Detik Nyata = 1 Jam Simulasi. Berhenti otomatis pada 24 Jam.</p>
+            </div>
+            
+            <div class="glass-panel p-4 rounded-xl pointer-events-auto border-l-4 border-blue-500">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Waktu Simulasi</div>
+                        <div class="text-3xl font-bold text-blue-700 digital-font tracking-tight" id="time-ui">00:00</div>
+                    </div>
+                    <div id="status-badge" class="bg-yellow-100 text-yellow-800 text-xs font-bold px-2 py-1 rounded animate-pulse">JEDA</div>
+                </div>
+                
+                <div class="flex gap-2 w-full">
+                    <button id="btn-start" class="flex-1 bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded text-sm font-semibold transition shadow-sm" onclick="startSim()">Mulai</button>
+                    <button id="btn-pause" class="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1.5 rounded text-sm font-semibold transition shadow-sm disabled:opacity-50" onclick="pauseSim()" disabled>Jeda</button>
+                    <button id="btn-reset" class="flex-1 bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded text-sm font-semibold transition shadow-sm" onclick="resetSim()">Reset</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-panel p-5 rounded-2xl pointer-events-auto flex flex-col gap-3 min-w-[320px]">
+            <div class="flex items-center justify-between border-b border-gray-200 pb-2">
+                <span class="text-sm font-semibold text-gray-600">Total Daya Aktif</span>
+                <span class="text-2xl font-bold text-orange-500 digital-font" id="total-power-ui">0 W</span>
+            </div>
+            
+            <div class="flex items-center gap-4 py-2">
+                <div class="w-14 h-14 rounded-full border-4 border-gray-300 relative overflow-hidden flex-shrink-0 bg-white flex items-center justify-center shadow-inner">
+                    <div id="meter-disc" class="w-full h-1 bg-red-500 absolute meter-spin"></div>
+                    <div class="w-10 h-10 rounded-full bg-gray-100 z-10 absolute flex items-center justify-center border border-gray-200">
+                        <span class="text-[9px] font-bold text-gray-500">kWh</span>
+                    </div>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-500 font-medium uppercase">Energi Terpakai</div>
+                    <div class="text-2xl font-black digital-font tracking-wider text-gray-800" id="kwh-ui">0.0000</div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-3 text-white mt-1 shadow-inner">
+                <div class="flex justify-between items-end">
+                    <div class="text-xs text-gray-400">Tarif / kWh<br><span class="text-gray-300">Rp 1.500,00</span></div>
+                    <div class="text-xl font-bold text-green-400 digital-font" id="cost-ui">Rp 0,00</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="absolute bottom-0 left-0 w-full p-4 md:p-6 pointer-events-none flex flex-col md:flex-row justify-between items-end gap-4 z-10 h-[65vh] justify-end">
+        
+        <!-- Panel Saklar (Scrollable) -->
+        <div class="glass-panel p-4 rounded-2xl pointer-events-auto w-full md:w-80 flex flex-col gap-3 shadow-lg max-h-full">
+            <h2 class="font-bold text-gray-800 border-b border-gray-200 pb-2 flex items-center gap-2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-blue-500"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+                Saklar (13 Perangkat)
+            </h2>
+            <p class="text-[10px] text-gray-500 -mt-2">Atur beban sebelum atau saat simulasi berjalan.</p>
+            
+            <div class="flex flex-col gap-2 custom-scroll overflow-y-auto pr-2 pb-2" id="appliance-list">
+                <!-- Javascript will inject list here -->
+            </div>
+        </div>
+
+        <div class="glass-panel p-5 rounded-2xl pointer-events-auto w-full md:w-[450px] flex flex-col gap-3 shadow-lg max-h-full">
+            <h2 class="font-bold text-gray-800 border-b border-gray-200 pb-2 flex items-center gap-2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-yellow-500"><path d="M2 12h4l3-9 5 18 3-9h5"/></svg>
+                Materi Fisika Listrik
+            </h2>
+            <div class="custom-scroll overflow-y-auto text-sm text-gray-700 space-y-3 pr-2">
+                <div class="bg-blue-50 p-3 rounded-lg border border-blue-100 shadow-sm">
+                    <h3 class="font-bold text-blue-800 text-sm mb-1">1. Hukum Watt & Ohm</h3>
+                    <code class="block bg-white p-1 rounded font-bold text-blue-900 border text-xs text-center mb-1">P = V × I &nbsp;&nbsp;|&nbsp;&nbsp; V = I × R</code>
+                    <p class="text-xs text-gray-600 leading-relaxed">Daya (P) bergantung pada Tegangan (V) dan Arus (I). Perangkat seperti AC (800W) dan Kompor (1000W) menyedot arus sangat besar karena memiliki hambatan kecil.</p>
+                </div>
+                <div class="bg-red-50 p-3 rounded-lg border border-red-100 shadow-sm">
+                    <h3 class="font-bold text-red-800 text-sm mb-1">2. Hukum Joule & Efisiensi</h3>
+                    <code class="block bg-white p-1 rounded font-bold text-red-900 border text-xs text-center mb-1">W = I² × R × t</code>
+                    <p class="text-xs text-gray-600 leading-relaxed">Perangkat pemanas membuang energi berbanding lurus dengan kuadrat arus (I²). Lampu pijar sangat boros karena ia menghasilkan panas berlebih, tidak seperti LED yang mengubah listrik langsung menjadi cahaya.</p>
+                </div>
+                <div class="bg-green-50 p-3 rounded-lg border border-green-100 shadow-sm">
+                    <h3 class="font-bold text-green-800 text-sm mb-1">3. Menghitung Biaya Listrik</h3>
+                    <code class="block bg-white p-1 rounded font-bold text-green-900 border text-xs text-center mb-1">Energi = Daya (kW) × Waktu (Jam)</code>
+                    <p class="text-xs text-gray-600 leading-relaxed">Meteran PLN mengukur dalam KiloWatt-Hour (kWh). Jika total beban 2000W menyala 1 jam = 2 kWh. Dikalikan tarif, itulah tagihannya.</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="modal-24h" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center backdrop-blur-md px-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 animate-pop-in">
+            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="text-blue-600"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            </div>
+            <h2 class="text-2xl font-bold text-center text-gray-800 mb-2">Siklus 24 Jam Selesai</h2>
+            <p class="text-center text-gray-600 mb-6 text-sm">Simulasi otomatis dijeda. Berikut adalah hasil penggunaan listrik selama 1 hari (24 Jam) berdasarkan beban yang Anda atur.</p>
+            
+            <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6 shadow-inner">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-sm font-semibold text-gray-600">Total Energi 1 Hari:</span>
+                    <span class="text-lg font-bold text-blue-600 digital-font" id="modal-kwh">0 kWh</span>
+                </div>
+                <div class="flex justify-between items-center pt-2 border-t border-gray-200">
+                    <span class="text-sm font-semibold text-gray-600">Total Biaya 1 Hari:</span>
+                    <span class="text-2xl font-bold text-green-500 digital-font" id="modal-cost">Rp 0</span>
+                </div>
+            </div>
+
+            <div class="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6 rounded-r-lg">
+                <h3 class="font-bold text-yellow-800 text-sm mb-2 flex items-center gap-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+                    Tugas Proyek Siswa:
+                </h3>
+                <p class="text-xs text-yellow-900 space-y-2 leading-relaxed">
+                    Hitunglah perkiraan tagihan listrik berdasarkan Biaya 1 Hari di atas:<br>
+                    <span class="block bg-yellow-100 p-2 rounded mt-1 border border-yellow-200">
+                        1. <strong>Tagihan 1 Minggu:</strong> (Biaya 1 Hari × 7)<br>
+                        2. <strong>Tagihan 1 Bulan:</strong> (Biaya 1 Hari × 30)
+                    </span>
+                    Catat hasilnya di buku laporan Anda!
+                </p>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="resetSim(); closeModal();" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-lg transition border border-gray-300">Ulangi Simulasi</button>
+                <button onclick="closeModal()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition shadow-md">Tutup Panel</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Konstanta & State ---
+        const TARIFF_PER_KWH = 1500;
+        
+        let simState = 'paused'; // 'paused', 'running', 'ended'
+        let simulatedHours = 0; // 0 to 24
+        let totalKWh = 0;
+        let totalCost = 0;
+        
+        let lastTime = performance.now();
+        let meterRotation = 0;
+
+        // --- Daftar Alat & Lampu ---
+        const appliances = {
+            ac:       { name: "AC",             power: 800,  category: "Alat", isOn: false, objects: {} },
+            washer:   { name: "Mesin Cuci",     power: 350,  category: "Alat", isOn: false, objects: {} },
+            pc:       { name: "Komputer",       power: 250,  category: "Alat", isOn: false, objects: {} },
+            fridge:   { name: "Kulkas",         power: 150,  category: "Alat", isOn: false, objects: {} },
+            pump:     { name: "Pompa Air",      power: 125,  category: "Alat", isOn: false, objects: {} },
+            tv:       { name: "TV",             power: 100,  category: "Alat", isOn: false, objects: {} },
+            fan:      { name: "Kipas Angin",    power: 50,   category: "Alat", isOn: false, objects: {} },
+            stove:    { name: "Kompor Listrik", power: 1000, category: "Alat", isOn: false, objects: {} },
+            
+            bulbInc:  { name: "Lampu Pijar",    power: 60,   category: "Lampu", isOn: false, objects: {} },
+            bulbHang: { name: "Lampu Hias",     power: 40,   category: "Lampu", isOn: false, objects: {} },
+            bulbWall: { name: "Lampu Dinding",  power: 15,   category: "Lampu", isOn: false, objects: {} },
+            bulbDesk: { name: "Lampu Meja",     power: 15,   category: "Lampu", isOn: false, objects: {} },
+            bulbLED:  { name: "Lampu LED",      power: 10,   category: "Lampu", isOn: false, objects: {} }
+        };
+
+        const formatRupiah = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(number);
+        const padZero = (num) => num.toString().padStart(2, '0');
+
+        const listContainer = document.getElementById('appliance-list');
+        for (const [id, app] of Object.entries(appliances)) {
+            const div = document.createElement('div');
+            div.className = "flex justify-between items-center p-2.5 bg-gray-50 rounded-lg hover:bg-gray-100 transition border border-gray-100";
+            div.innerHTML = `
+                <div>
+                    <div class="font-semibold text-sm text-gray-800">${app.name}</div>
+                    <div class="text-[11px] ${app.category === 'Lampu' ? 'text-yellow-600 font-bold' : 'text-gray-500'} font-mono">${app.power} Watt</div>
+                </div>
+                <div class="relative inline-block w-10 mr-2 align-middle">
+                    <input type="checkbox" id="toggle-${id}" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer" onclick="window.toggleAppliance('${id}')"/>
+                    <label for="toggle-${id}" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer"></label>
+                </div>
+            `;
+            listContainer.appendChild(div);
+        }
+
+        window.toggleAppliance = function(id) {
+            if (appliances[id]) {
+                appliances[id].isOn = !appliances[id].isOn;
+                updateVisuals(id);
+                updateDashboard();
+            }
+        };
+
+        window.startSim = function() {
+            if (simState === 'ended') return;
+            simState = 'running';
+            lastTime = performance.now(); // Reset delta timer
+            
+            document.getElementById('btn-start').disabled = true;
+            document.getElementById('btn-start').classList.add('opacity-50');
+            
+            document.getElementById('btn-pause').disabled = false;
+            document.getElementById('btn-pause').classList.remove('opacity-50');
+            
+            const badge = document.getElementById('status-badge');
+            badge.innerText = "BERJALAN";
+            badge.className = "bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded animate-pulse";
+        };
+
+        window.pauseSim = function() {
+            if (simState === 'ended') return;
+            simState = 'paused';
+            
+            document.getElementById('btn-start').disabled = false;
+            document.getElementById('btn-start').classList.remove('opacity-50');
+            
+            document.getElementById('btn-pause').disabled = true;
+            document.getElementById('btn-pause').classList.add('opacity-50');
+            
+            const badge = document.getElementById('status-badge');
+            badge.innerText = "JEDA";
+            badge.className = "bg-yellow-100 text-yellow-800 text-xs font-bold px-2 py-1 rounded";
+        };
+
+        window.resetSim = function() {
+            simState = 'paused';
+            simulatedHours = 0; 
+            totalKWh = 0; 
+            totalCost = 0;
+            
+            for(let key in appliances) {
+                appliances[key].isOn = false;
+                document.getElementById(`toggle-${key}`).checked = false;
+                updateVisuals(key);
+            }
+            
+            updateDashboard(); 
+            updateTimeUI();
+            
+            document.getElementById('btn-start').disabled = false;
+            document.getElementById('btn-start').classList.remove('opacity-50');
+            document.getElementById('btn-pause').disabled = true;
+            document.getElementById('btn-pause').classList.add('opacity-50');
+            
+            const badge = document.getElementById('status-badge');
+            badge.innerText = "JEDA";
+            badge.className = "bg-yellow-100 text-yellow-800 text-xs font-bold px-2 py-1 rounded";
+            
+            closeModal();
+            lastTime = performance.now();
+        };
+
+        window.closeModal = function() {
+            const modal = document.getElementById('modal-24h');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        };
+
+        function getTotalPower() {
+            let power = 0;
+            for (let key in appliances) if (appliances[key].isOn) power += appliances[key].power;
+            return power;
+        }
+
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        
+        // Warna background lebih natural (biru-abu langit pucat)
+        scene.background = new THREE.Color(0xd1d5db); 
+        scene.fog = new THREE.Fog(0xd1d5db, 40, 150);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 25, 55);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        // Menggunakan ACES Filmic untuk tone mapping agar lampu terang terlihat natural
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0; 
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1; // Don't go below floor
+        controls.minDistance = 15;
+        controls.maxDistance = 70;
+        controls.target.set(0, 5, 0);
+
+        // --- PENCAHAYAAN NATURAL ---
+        // Hemisphere Light (Cahaya menyebar dari langit dan tanah)
+        // Langit sedikit kebiruan, lantai agak keabuan. Lembut.
+        const hemiLight = new THREE.HemisphereLight(0xe0f2fe, 0x9ca3af, 0.5);
+        scene.add(hemiLight);
+
+        // Ambient Light untuk menghilangkan bayangan hitam pekat
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        // Directional Light utama (seperti cahaya matahari dari jendela atau lampu ruangan utama)
+        // Agak hangat warnanya
+        const dirLight = new THREE.DirectionalLight(0xfff5e6, 0.8);
+        dirLight.position.set(25, 40, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 150;
+        dirLight.shadow.camera.left = -30;
+        dirLight.shadow.camera.right = 30;
+        dirLight.shadow.camera.top = 30;
+        dirLight.shadow.camera.bottom = -30;
+        dirLight.shadow.bias = -0.0005; // Mengurangi shadow acne
+        scene.add(dirLight);
+
+        // Lantai kayu natural
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0xcfb292, roughness: 0.8 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+
+        // Dinding ruangan
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xebf0f2, roughness: 0.95 });
+        const wallBack = new THREE.Mesh(new THREE.PlaneGeometry(100, 35), wallMat);
+        wallBack.position.set(0, 17.5, -25); wallBack.receiveShadow = true; scene.add(wallBack);
+        
+        const wallLeft = new THREE.Mesh(new THREE.PlaneGeometry(100, 35), wallMat);
+        wallLeft.rotation.y = Math.PI / 2; wallLeft.position.set(-30, 17.5, 0); wallLeft.receiveShadow = true; scene.add(wallLeft);
+
+        // NOTE: Menggunakan off-white (0xf0f0f0 atau 0xe8e8e8) untuk material putih agar bayangan terlihat.
+
+        // 1. Kipas Angin (50W)
+        function buildFan() {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6 });
+            const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.3, 32), mat);
+            base.position.y = 0.15; base.castShadow = true; group.add(base);
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 5), mat);
+            pole.position.y = 2.5; pole.castShadow = true; group.add(pole);
+            const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.5), mat);
+            motor.rotation.x = Math.PI/2; motor.position.set(0, 5, -0.5); motor.castShadow = true; group.add(motor);
+
+            const blades = new THREE.Group(); blades.position.set(0, 5, 0.4);
+            const bladeMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, side: THREE.DoubleSide });
+            const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.5, 0.05), bladeMat);
+            const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.5, 0.05), bladeMat); b2.rotation.z = Math.PI/2;
+            b1.castShadow = true; b2.castShadow = true;
+            blades.add(b1, b2); group.add(blades);
+
+            group.position.set(-15, 0, -5); scene.add(group);
+            appliances.fan.objects.blades = blades;
+        }
+
+        // 2. TV (100W)
+        function buildTV() {
+            const group = new THREE.Group();
+            const table = new THREE.Mesh(new THREE.BoxGeometry(8, 2, 3), new THREE.MeshStandardMaterial({ color: 0x5a483a, roughness:0.7 }));
+            table.position.y = 1; table.castShadow = true; table.receiveShadow = true; group.add(table);
+            const tvBody = new THREE.Mesh(new THREE.BoxGeometry(7, 4, 0.3), new THREE.MeshStandardMaterial({ color: 0x111111, roughness:0.4 }));
+            tvBody.position.set(0, 4.2, 0); tvBody.castShadow = true; group.add(tvBody);
+            const screen = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 3.6), new THREE.MeshBasicMaterial({ color: 0x050505 }));
+            screen.position.set(0, 4.2, 0.16); group.add(screen);
+            
+            group.position.set(-5, 0, -18); scene.add(group);
+            appliances.tv.objects.screenMat = screen.material;
+        }
+
+        // 3. Mesin Cuci (350W)
+        function buildWasher() {
+            const group = new THREE.Group();
+            // Off-white supaya bayangan tidak hilang
+            const body = new THREE.Mesh(new THREE.BoxGeometry(4.5, 5.5, 4.5), new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.3 }));
+            body.position.y = 2.75; body.castShadow = true; body.receiveShadow = true; group.add(body);
+            const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.2, 24), new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.5 }));
+            drum.rotation.x = Math.PI/2; drum.position.set(0, 3, 2.3); group.add(drum);
+            const window = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.1, 24), new THREE.MeshStandardMaterial({ color: 0x93c5fd, transparent:true, opacity:0.6 }));
+            window.rotation.x = Math.PI/2; window.position.set(0, 3, 2.45); group.add(window);
+            
+            group.position.set(5, 0, -20); scene.add(group);
+            appliances.washer.objects.drum = drum;
+        }
+
+        // 4. Kulkas (150W)
+        function buildFridge() {
+            const group = new THREE.Group();
+            // Off-white / Silver metalik ringan
+            const body = new THREE.Mesh(new THREE.BoxGeometry(5, 11, 5), new THREE.MeshStandardMaterial({ color: 0xe5e7eb, roughness: 0.2, metalness: 0.1 }));
+            body.position.y = 5.5; body.castShadow = true; body.receiveShadow = true; group.add(body);
+            
+            const handle1 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3), new THREE.MeshStandardMaterial({color:0x9ca3af}));
+            handle1.position.set(1.5, 3.5, 2.6); group.add(handle1);
+            const handle2 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3), new THREE.MeshStandardMaterial({color:0x9ca3af}));
+            handle2.position.set(1.5, 8.5, 2.6); group.add(handle2);
+
+            const led = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0x555555 }));
+            led.position.set(1.5, 10.5, 2.51); group.add(led);
+            
+            group.position.set(14, 0, -19.5); scene.add(group);
+            appliances.fridge.objects.ledMat = led.material;
+        }
+
+        // 5. AC (800W)
+        function buildAC() {
+            const group = new THREE.Group();
+            // Off-white
+            const body = new THREE.Mesh(new THREE.BoxGeometry(7, 2, 1.5), new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4 }));
+            body.castShadow = true; group.add(body);
+            const vent = new THREE.Mesh(new THREE.BoxGeometry(6, 0.3, 0.2), new THREE.MeshStandardMaterial({color:0x222222}));
+            vent.position.set(0, -0.6, 0.7); group.add(vent);
+
+            const led = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0x555555 }));
+            led.position.set(2.5, -0.4, 0.76); group.add(led);
+            
+            group.position.set(-5, 24, -24); scene.add(group);
+            appliances.ac.objects.ledMat = led.material;
+        }
+
+        // 6. Kompor Listrik (1000W)
+        function buildStove() {
+            const group = new THREE.Group();
+            const table = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 4.5), new THREE.MeshStandardMaterial({ color: 0x6b7280 }));
+            table.position.y = 2; table.castShadow = true; table.receiveShadow = true; group.add(table);
+            const stoveBody = new THREE.Mesh(new THREE.BoxGeometry(5, 0.3, 3.5), new THREE.MeshStandardMaterial({ color: 0x111111, roughness:0.2 }));
+            stoveBody.position.y = 4.15; group.add(stoveBody);
+            
+            const coilMat = new THREE.MeshBasicMaterial({ color: 0x333333 });
+            const coil1 = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.05, 32), coilMat);
+            coil1.position.set(-1.3, 4.31, 0); group.add(coil1);
+            const coil2 = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.05, 32), coilMat);
+            coil2.position.set(1.3, 4.31, 0); group.add(coil2);
+
+            group.position.set(22, 0, -12); scene.add(group);
+            appliances.stove.objects.coilMat = coilMat;
+        }
+
+        // 7. Komputer (250W)
+        function buildComputer() {
+            const group = new THREE.Group();
+            const desk = new THREE.Mesh(new THREE.BoxGeometry(7, 3.2, 4), new THREE.MeshStandardMaterial({ color: 0x374151 }));
+            desk.position.y = 1.6; desk.castShadow = true; desk.receiveShadow = true; group.add(desk);
+            const cpu = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.5, 3), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+            cpu.position.set(-2.5, 4.45, 0); cpu.castShadow = true; group.add(cpu);
+            const monitor = new THREE.Mesh(new THREE.BoxGeometry(3.5, 2.2, 0.2), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+            monitor.position.set(0.5, 4.5, 0); monitor.castShadow = true; group.add(monitor);
+            const screen = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 2.0), new THREE.MeshBasicMaterial({ color: 0x050505 }));
+            screen.position.set(0.5, 4.5, 0.11); group.add(screen);
+
+            group.position.set(-23, 0, -15); scene.add(group);
+            appliances.pc.objects.screenMat = screen.material;
+        }
+
+        // 8. Pompa Air (125W)
+        function buildPump() {
+            const group = new THREE.Group();
+            const motor = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 2.5, 24), new THREE.MeshStandardMaterial({ color: 0x047857, roughness:0.6 }));
+            motor.rotation.z = Math.PI/2; motor.position.y = 1.2; motor.castShadow = true; group.add(motor);
+            const pipe1 = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 3), new THREE.MeshStandardMaterial({ color: 0x9ca3af }));
+            pipe1.position.set(1.5, 2.7, 0); group.add(pipe1);
+            const pipe2 = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 2), new THREE.MeshStandardMaterial({ color: 0x9ca3af }));
+            pipe2.rotation.x = Math.PI/2; pipe2.position.set(1.5, 1.2, 1); group.add(pipe2);
+            
+            const led = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0x555555 }));
+            led.position.set(0, 2.2, 0.9); group.add(led);
+
+            group.position.set(22, 0, 5); scene.add(group);
+            appliances.pump.objects.ledMat = led.material;
+            appliances.pump.objects.motor = motor;
+        }
+
+        function buildLamps() {
+            // A. Lampu Pijar (60W) - Kiri
+            const pijar = new THREE.Group();
+            const w1 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 5), new THREE.MeshStandardMaterial({color:0x111111}));
+            w1.position.y = 2.5; pijar.add(w1);
+            const bulbPijar = new THREE.Mesh(new THREE.SphereGeometry(0.8, 24, 24), new THREE.MeshStandardMaterial({color: 0xffffff, transparent:true, opacity:0.2, roughness:0.1}));
+            pijar.add(bulbPijar);
+            // Point light lampu pijar (Kuning/Warm White, terang)
+            const lightPijar = new THREE.PointLight(0xffb04f, 0, 60); lightPijar.castShadow = true; pijar.add(lightPijar);
+            pijar.position.set(-12, 26, 2); scene.add(pijar);
+            appliances.bulbInc.objects = { mat: bulbPijar.material, light: lightPijar, color: 0xffb04f, emissiveIntensity: 2.5 };
+
+            // B. Lampu LED (10W) - Kanan
+            const ledG = new THREE.Group();
+            const w2 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 5), new THREE.MeshStandardMaterial({color:0xffffff}));
+            w2.position.y = 2.5; ledG.add(w2);
+            const bulbLED = new THREE.Mesh(new THREE.SphereGeometry(0.7, 24, 24, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshStandardMaterial({color: 0xffffff, roughness:0.2}));
+            bulbLED.rotation.x = Math.PI; ledG.add(bulbLED);
+            // Point light LED (Putih bersih, tidak terlalu menyilaukan)
+            const lightLED = new THREE.PointLight(0xffffff, 0, 70); lightLED.castShadow = true; ledG.add(lightLED);
+            ledG.position.set(12, 26, 2); scene.add(ledG);
+            appliances.bulbLED.objects = { mat: bulbLED.material, light: lightLED, color: 0xffffff, emissiveIntensity: 1.5 };
+
+            // C. Lampu Dinding (15W) - Belakang Tengah
+            const wallG = new THREE.Group();
+            const boxWall = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshStandardMaterial({color:0xf0f0f0, roughness:0.5}));
+            boxWall.castShadow = true; wallG.add(boxWall);
+            const lightWall = new THREE.PointLight(0xffddaa, 0, 45); wallG.add(lightWall);
+            wallG.position.set(5, 18, -24.5); scene.add(wallG);
+            appliances.bulbWall.objects = { mat: boxWall.material, light: lightWall, color: 0xffddaa, emissiveIntensity: 1 };
+
+            // D. Lampu Hias (40W) - Tengah Atas
+            const hiasG = new THREE.Group();
+            const w3 = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 6), new THREE.MeshStandardMaterial({color:0xd4af37, metalness:0.8, roughness:0.2}));
+            w3.position.y = 3; hiasG.add(w3);
+            const kap = new THREE.Mesh(new THREE.ConeGeometry(2.5, 2, 24), new THREE.MeshStandardMaterial({color:0x111827, roughness:0.7, side: THREE.DoubleSide}));
+            kap.position.y = -0.5; kap.castShadow = true; hiasG.add(kap);
+            const bulbHias = new THREE.Mesh(new THREE.SphereGeometry(0.7), new THREE.MeshStandardMaterial({color:0xffffff}));
+            bulbHias.position.y = -1.2; hiasG.add(bulbHias);
+            const lightHias = new THREE.PointLight(0xffeebb, 0, 80); lightHias.position.y = -2; lightHias.castShadow = true; hiasG.add(lightHias);
+            hiasG.position.set(0, 27, -5); scene.add(hiasG);
+            appliances.bulbHang.objects = { mat: bulbHias.material, light: lightHias, color: 0xffeebb, emissiveIntensity: 1.8 };
+
+            // E. Lampu Meja (15W) - Atas Meja PC
+            const deskG = new THREE.Group();
+            const dBase = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.1), new THREE.MeshStandardMaterial({color:0x111111}));
+            deskG.add(dBase);
+            const bulbDesk = new THREE.Mesh(new THREE.SphereGeometry(0.4), new THREE.MeshStandardMaterial({color:0xffffff}));
+            bulbDesk.position.set(0, 1.5, 0); deskG.add(bulbDesk);
+            const lightDesk = new THREE.PointLight(0xffcc88, 0, 30); lightDesk.position.set(0, 1.5, 0); deskG.add(lightDesk);
+            deskG.position.set(-24, 3.3, -16); scene.add(deskG);
+            appliances.bulbDesk.objects = { mat: bulbDesk.material, light: lightDesk, color: 0xffcc88, emissiveIntensity: 1.2 };
+        }
+
+        buildFan(); buildTV(); buildWasher(); buildFridge(); buildAC();
+        buildStove(); buildComputer(); buildPump(); buildLamps();
+
+        function updateVisuals(id) {
+            const app = appliances[id];
+            const isOn = app.isOn;
+            const objs = app.objects;
+
+            if (app.category === 'Lampu') {
+                objs.mat.emissive = isOn ? new THREE.Color(objs.color) : new THREE.Color(0x000000);
+                objs.mat.emissiveIntensity = isOn ? objs.emissiveIntensity : 0;
+                if(objs.mat.transparent) objs.mat.opacity = isOn ? 1 : 0.2;
+                objs.light.intensity = isOn ? (app.power * 0.8) : 0; 
+            } else {
+                switch(id) {
+                    case 'tv':
+                        objs.screenMat.color.setHex(isOn ? 0xffffff : 0x050505);
+                        // Optional: Add tiny point light for TV screen glow
+                        break;
+                    case 'pc':
+                        objs.screenMat.color.setHex(isOn ? 0x0ea5e9 : 0x050505); // Blue-ish screen
+                        break;
+                    case 'stove':
+                        objs.coilMat.color.setHex(isOn ? 0xff3300 : 0x333333);
+                        break;
+                    case 'ac':
+                    case 'fridge':
+                    case 'pump':
+                        if(objs.ledMat) objs.ledMat.color.setHex(isOn ? 0x10b981 : 0x555555); // Green LED
+                        break;
+                }
+            }
+        }
+
+        function updateDashboard() {
+            document.getElementById('total-power-ui').innerText = getTotalPower() + ' W';
+            document.getElementById('kwh-ui').innerText = totalKWh.toFixed(4);
+            document.getElementById('cost-ui').innerText = formatRupiah(totalCost);
+        }
+
+        function updateTimeUI() {
+            const h = Math.floor(simulatedHours);
+            const m = Math.floor((simulatedHours - h) * 60);
+            document.getElementById('time-ui').innerText = `${padZero(h)}:${padZero(m)}`;
+        }
+
+        function trigger24hAlert() {
+            simState = 'ended';
+            
+            document.getElementById('modal-kwh').innerText = totalKWh.toFixed(2) + " kWh";
+            document.getElementById('modal-cost').innerText = formatRupiah(totalCost);
+            
+            const modal = document.getElementById('modal-24h');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            document.getElementById('btn-pause').disabled = true;
+            document.getElementById('btn-pause').classList.add('opacity-50');
+            
+            const badge = document.getElementById('status-badge');
+            badge.innerText = "SELESAI (24J)";
+            badge.className = "bg-red-100 text-red-800 text-xs font-bold px-2 py-1 rounded";
+        }
+
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+            
+            // Calculate delta in real seconds
+            const deltaSec = (currentTime - lastTime) / 1000; 
+            lastTime = currentTime;
+
+            // Animations for active devices
+            if (appliances.fan.isOn) appliances.fan.objects.blades.rotation.z -= 12 * deltaSec;
+            if (appliances.washer.isOn) appliances.washer.objects.drum.rotation.x -= 6 * deltaSec;
+            if (appliances.pump.isOn) appliances.pump.objects.motor.rotation.y += 20 * deltaSec; 
+
+            // Time & Energy Simulation Logic
+            if (simState === 'running') {
+                // 1 Real Second = 1 Simulated Hour
+                let simHoursThisFrame = deltaSec * 1; 
+                
+                if (simulatedHours + simHoursThisFrame >= 24) {
+                    simHoursThisFrame = 24 - simulatedHours;
+                    simulatedHours = 24;
+                    
+                    // Add remaining energy before stopping
+                    const powerW = getTotalPower();
+                    const kwhThisFrame = (powerW / 1000) * simHoursThisFrame;
+                    totalKWh += kwhThisFrame;
+                    totalCost = totalKWh * TARIFF_PER_KWH;
+                    
+                    updateTimeUI();
+                    updateDashboard();
+                    trigger24hAlert();
+                } else {
+                    simulatedHours += simHoursThisFrame;
+                    
+                    const powerW = getTotalPower();
+                    if (powerW > 0) { 
+                        // Energi = Daya (kW) * Waktu (Jam)
+                        const kwhThisFrame = (powerW / 1000) * simHoursThisFrame;
+                        totalKWh += kwhThisFrame;
+                        totalCost = totalKWh * TARIFF_PER_KWH;
+
+                        updateDashboard();
+
+                        // Spin the meter disc visually based on power consumption
+                        meterRotation += (powerW * deltaSec * 0.15);
+                        document.getElementById('meter-disc').style.transform = `rotate(${meterRotation}deg)`;
+                    }
+                    updateTimeUI();
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start Loop
+        requestAnimationFrame((time) => { lastTime = time; animate(time); });
+
+    </script>
+</body>
+</html>
